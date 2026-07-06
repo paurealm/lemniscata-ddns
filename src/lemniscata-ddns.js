@@ -1,4 +1,4 @@
-const https = require("https")
+const http = require("http")
 const dotenv = require("dotenv")
 dotenv.config()
 
@@ -69,7 +69,7 @@ const listen = async () => {
     let timeWithoutPings = 0;
     let lastUpdatedIp = ""
 
-    https.createServer((req, res) => {
+    const server = http.createServer((req, res) => {
         const address = req.socket.remoteAddress;
         if (address === lastUpdatedIp) {
             timeWithoutPings = 0;
@@ -78,6 +78,10 @@ const listen = async () => {
             res.end()
         }
     })
+    server.listen(process.env.PING_SERVER_PORT, () => {
+        console.log("Ping server listening at port " + process.env.PING_SERVER_PORT)
+    })
+
     while (true) {
         do {
             await new Promise(resolve => setTimeout(resolve, 1000));
