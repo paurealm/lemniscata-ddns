@@ -1,13 +1,3 @@
-const http = require("http")
-const dotenv = require("dotenv")
-dotenv.config()
-
-const pingSelf = () => {
-    fetch(`https://${process.env.WAN_URL}`, {
-        method: "GET"
-    }).catch(error => console.error("Error while pinguing self:", error))
-}
-
 const getCloudflareDnsData = async () => {
     try {
         return await fetch(`https://api.cloudflare.com/client/v4/zones/${process.env.ZONE_ID}/dns_records?name=${process.env.RECORD_NAME}&type=A`, {
@@ -49,9 +39,8 @@ const getWanIp = async () => {
     }
 }
 
-const triggerIpUpdate = async () => {
+const triggerIpUpdate = async currentWanIp => {
     return new Promise(async (resolve) => {
-        const currentWanIp = await getWanIp().then(response => response.text())
         const dnsData = await getCloudflareDnsData().then(response => response.json())
 
         if (currentWanIp && dnsData && dnsData.result && dnsData.result.length == 1) {
@@ -62,34 +51,32 @@ const triggerIpUpdate = async () => {
                 console.log(patchResponse)
             }
         }
+
+        resolve();
     })
 }
 
-const listen = async () => {
-    let timeWithoutPings = 0;
-    let lastUpdatedIp = ""
-
-    const server = http.createServer((req, res) => {
-        const address = req.socket.remoteAddress;
-        if (address === lastUpdatedIp) {
-            timeWithoutPings = 0;
-        } else {
-            res.writeHead(200),
-            res.end()
-        }
-    })
-    server.listen(process.env.PING_SERVER_PORT, () => {
-        console.log("Ping server listening at port " + process.env.PING_SERVER_PORT)
-    })
-
+const listenToWanChanges = async () => {
+    let lastWanAddress = undefined
+    let repeatsUntilFullComprobation = 1
     while (true) {
-        do {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        } while (timeWithoutPings++ <= process.env.PING_COOLDOWN + 5);
+        try {
+            await new Promise(resolve => setTimeout(resolve, 1000 * process.env.PING_COOLDOWN))
 
-        triggerIpUpdate()
+            const currentWanIp = await getWanIp().then(response => response.text()).catch(error => lastWanAddress)
+
+            if (isValidIp(currentWanIp) ((currentWanIp !== lastWanAddress) || (repeatsUntilFullComprobation-- == 0))) {
+                await triggerIpUpdate(currentWanIp)
+                lastWanAddress = currentWanIp
+                repeatsUntilFullComprobation = 30
+            }
+        } catch (_) {}
+        
     }
 }
 
-setInterval(pingSelf, process.env.PING_COOLDOWN)
-listen()
+const isValidIp = ip => {
+    return ("" + ip).match(/^(\b25[0-5]|\b2[0-4][0-9]|\b[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/gm)
+}
+
+listenToWanChanges()
